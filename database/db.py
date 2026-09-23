@@ -1,37 +1,36 @@
 import logging
 import os
-import urllib.parse
+import ssl
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from database.models import Base
 
 logger = logging.getLogger(__name__)
 
-raw_url = os.getenv("DATABASE_URL", "").strip()
+# Полный приоритет на локальный SQLite:
+# Если переменная DATABASE_URL пустая, либо указан sqlite, либо указано явно "USE_SQLITE=1"
+USE_SQLITE = os.getenv("USE_SQLITE", "1").strip().lower() in ("1", "true", "yes")
 
-# Если передан DATABASE_URL от Postgres, очищаем параметры для asyncpg
-if raw_url and "postgres" in raw_url:
-    # Удаляем неподдерживаемые asyncpg параметры из query string (channel_binding и sslmode=require -> ssl=True)
-    parsed = urllib.parse.urlparse(raw_url)
-    query_params = urllib.parse.parse_qs(parsed.query)
-    
-    # asyncpg не поддерживает channel_binding
-    query_params.pop("channel_binding", None)
-    
-    # asyncpg использует ?ssl=true вместо ?sslmode=require
-    if "sslmode" in query_params:
-        query_params.pop("sslmode", None)
-        query_params["ssl"] = ["true"]
-
-    new_query = urllib.parse.urlencode(query_params, doseq=True)
-    scheme = "postgresql+asyncpg"
-    db_url = urllib.parse.urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-    logger.info("Подготовлен URL PostgreSQL (asyncpg): %s", parsed.netloc)
-else:
-    # Иначе чистый SQLite файл в папке бота
+if USE_SQLITE:
     db_url = "sqlite+aiosqlite:///bot_broadcast.db"
-    logger.info("Используется локальная база SQLite: %s", db_url)
+    connect_args = {}
+    logger.info("Режим базы данных: SQLite (%s)", db_url)
+else:
+    raw_url = os.getenv("DATABASE_URL", "").strip()
+    # Чистим параметры URL от конфликтующих параметров
+    base_url = raw_url.split("?")[0]
+    if base_url.startswith("postgres://"):
+        base_url = base_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif base_url.startswith("postgresql://") and not base_url.startswith("postgresql+asyncpg://"):
+        base_url = base_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(db_url, echo=False)
+    db_url = base_url
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connect_args = {"ssl": ssl_context}
+    logger.info("Режим базы данных: PostgreSQL (%s)", db_url.split("@")[-1])
+
+engine = create_async_engine(db_url, connect_args=connect_args, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def init_db():
