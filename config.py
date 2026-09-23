@@ -7,7 +7,7 @@ class Config(BaseSettings):
     admin_id: int = Field(default_factory=lambda: int(os.getenv("ADMIN_ID", "0")))
     api_id: int = Field(default_factory=lambda: int(os.getenv("API_ID", "0")))
     api_hash: str = Field(default_factory=lambda: os.getenv("API_HASH", ""))
-    database_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    database_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", "sqlite+aiosqlite:///bot_broadcast.db"))
 
     model_config = SettingsConfigDict(
         env_file=".env",
